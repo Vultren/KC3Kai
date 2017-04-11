@@ -10,12 +10,13 @@
 		statistics: false,
 		newsfeed: {},
 		showRawNewsfeed: false,
+		battleCounts: {},
 		
 		/* INIT
 		Prepares static data needed
 		---------------------------------*/
 		init :function(){
-
+			this.battleCounts.lastPortTime = 0;
 		},
 
 		/* RELOAD
@@ -103,27 +104,28 @@
 			});
 			
 			// Show health metric
-			let lastMonthSecs = Math.floor(new Date().shiftDate(-30).getTime() / 1000);
-			let last2DaySecs = Math.floor(new Date().shiftHour(-48).getTime() / 1000);
-			let lastDaySecs = Math.floor(new Date().shiftHour(-24).getTime() / 1000);
-			let lastMonthAvgBattle = 0, lastDayBattle = 0, last2DayBattle = 0;
-			KC3Database.count_sortie_battle(function(sc, bc){
-				$(".day_battle_total_24 .rank_content").html("{0} (during {1} sorties)".format(bc, sc));
-				lastDayBattle = bc;
-			}, lastDaySecs);
-			KC3Database.count_sortie_battle(function(sc, bc){
-				$(".day_battle_total_48 .rank_content").html("{0} (during {1} sorties)".format(bc, sc));
-				last2DayBattle = bc;
-			}, last2DaySecs);
-			KC3Database.count_sortie_battle(function(sc, bc){
-				$(".month_battle_total .rank_content").html("{0} (during {1} sorties)".format(bc, sc));
-				lastMonthAvgBattle = Math.round(bc / 30);
-				$(".month_battle_average .rank_content").html(lastMonthAvgBattle);
-				if(last2DayBattle > lastMonthAvgBattle * 3)
-					$(".day_battle_total_48 .rank_content").css("color", "orange");
-				if(lastDayBattle > lastMonthAvgBattle * 2)
-					$(".day_battle_total_24 .rank_content").css("color", "orange");
-			}, lastMonthSecs);
+			if(PlayerManager.hq.lastPortTime > this.battleCounts.lastPortTime){
+				let lastMonthSec = Math.floor(new Date().shiftDate(-30).getTime() / 1000);
+				let last2DaySec = Math.floor(new Date().shiftHour(-48).getTime() / 1000);
+				let lastDaySec = Math.floor(new Date().shiftHour(-24).getTime() / 1000);
+				KC3Database.count_sortie_battle(function(sc, bc){
+					self.battleCounts.lastDaySortie = sc;
+					self.battleCounts.lastDayBattle = bc;
+				}, lastDaySec);
+				KC3Database.count_sortie_battle(function(sc, bc){
+					self.battleCounts.last2DaySortie = sc;
+					self.battleCounts.last2DayBattle = bc;
+				}, last2DaySec);
+				KC3Database.count_sortie_battle(function(sc, bc){
+					self.battleCounts.lastMonthSortie = sc;
+					self.battleCounts.lastMonthBattle = bc;
+					self.battleCounts.lastMonthAvgBattle = Math.round(bc / 30);
+					self.battleCounts.lastPortTime = PlayerManager.hq.lastPortTime;
+					self.refreshHealthMetric();
+				}, lastMonthSec);
+			} else {
+				this.refreshHealthMetric();
+			}
 			
 			// Export all data
 			$(".tab_profile .export_data").on("click", function(){
@@ -452,8 +454,8 @@
 							KC3Database.con.navaloverall.where("id").equals(d.id).modify(function(r){r.type="lbas6";});
 						}
 					});
+					console.info("Ledger data of LBAS have been fixed");
 				});
-				console.info("Ledger data of LBAS have been fixed");
 				alert("Done 1/2~");
 				
 				// Fix "hq": "0"
@@ -471,11 +473,94 @@
 							KC3Database.con.useitem.put(rp);
 						}
 					}
+					console.info("Graph data of Consumables have been fixed");
 				});
-				console.info("Graph data of Consumables have been fixed");
 				alert("Done 2/2!");
 			});
 			
+			// Fix abyssal master IDs after 2017-04-05 (bump 1000)
+			$(".tab_profile .fix_abyssal").on("click", function(event){
+				// Fix table `enemy`. To update primary key, have to delete all records first
+				KC3Database.con.enemy.toArray(function(enemyList){
+					KC3Database.con.enemy.clear();
+					for(let r of enemyList){
+						if(r.id < 1501) { r.id += 1000; }
+						KC3Database.Enemy(r);
+					}
+					console.info("Enemy stats have been fixed");
+					alert("Done 1/3~");
+				});
+				
+				// Fix table `encounters`. To update primary key, have to delete all records first
+				KC3Database.con.encounters.toArray(function(encList){
+					KC3Database.con.encounters.clear();
+					for(let r of encList){
+						let ke = JSON.parse(r.ke);
+						if(ke.some(id => id > 500 && id < 1501)){
+							ke = ke.map(id => id > 500 ? id + 1000 : id);
+							r.ke = JSON.stringify(ke);
+							let id = r.uniqid.split("/");
+							id[4] = r.ke;
+							r.uniqid = id.join("/");
+						}
+						KC3Database.Encounter(r, false);
+					}
+					console.info("Encounters have been fixed");
+					alert("Done 2/3~");
+				});
+				
+				// Fix table `battle`
+				KC3Database.con.battle.toArray(function(battleList){
+					var updateKe = function(keArr){
+						if(Array.isArray(keArr) && keArr.some(id => id > 500 && id < 1501)){
+							return keArr.map(id => id > 500 ? id + 1000 : id);
+						}
+						return keArr;
+					};
+					var logError = function(e){ console.error(e); };
+					try {
+						for(let r of battleList){
+							let day = r.data;
+							let night = r.yasen;
+							if(day.api_ship_ke)
+								day.api_ship_ke = updateKe(day.api_ship_ke);
+							if(day.api_ship_ke_combined)
+								day.api_ship_ke_combined = updateKe(day.api_ship_ke_combined);
+							if(night.api_ship_ke)
+								night.api_ship_ke = updateKe(night.api_ship_ke);
+							if(night.api_ship_ke_combined)
+								night.api_ship_ke_combined = updateKe(night.api_ship_ke_combined);
+							KC3Database.con.battle.put(r).catch(logError);
+						}
+						console.info("Battle enemies have been fixed");
+					} catch(e) {
+						console.error(e);
+					}
+					alert("Done 3/3!");
+				});
+			});
+			
+		},
+		
+		refreshHealthMetric: function(){
+			var bc = this.battleCounts;
+			$(".day_battle_total_24 .rank_content").html(
+				'{0}<span style="font-weight:normal"> (during {1} sorties)</span>'
+					.format(bc.lastDayBattle, bc.lastDaySortie)
+			);
+			$(".day_battle_total_48 .rank_content").html(
+				'{0}<span style="font-weight:normal"> (during {1} sorties)</span>'
+					.format(bc.last2DayBattle, bc.last2DaySortie)
+			);
+			$(".month_battle_total .rank_content").html(
+				'{0}<span style="font-weight:normal"> (during {1} sorties)</span>'
+					.format(bc.lastMonthBattle, bc.lastMonthSortie)
+			);
+			$(".month_battle_average .rank_content").text(bc.lastMonthAvgBattle);
+			if(bc.last2DayBattle > 300 && bc.last2DayBattle > bc.lastMonthAvgBattle * 3)
+				$(".day_battle_total_48 .rank_content").css("color", "orange");
+			if(bc.lastDayBattle > 200 && bc.lastDayBattle > bc.lastMonthAvgBattle * 2)
+				$(".day_battle_total_24 .rank_content").css("color", "orange");
 		},
 		
 		refreshNewsfeed: function(showRawNewsfeed){

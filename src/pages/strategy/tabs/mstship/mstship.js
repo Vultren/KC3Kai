@@ -101,11 +101,9 @@
 				shipBox.attr("data-id", ShipData.api_id);
 				shipBox.data("bs", ShipData.kc3_bship);
 				
-				if(ShipData.api_id<=500){
-					$("img", shipBox).attr("src", KC3Meta.shipIcon(ShipData.api_id) );
-				}else{
-					$("img", shipBox).attr("src", KC3Meta.abyssIcon(ShipData.api_id) );
-				}
+				$("img", shipBox).attr("src", KC3Master.isAbyssalShip(ShipData.api_id) ?
+					KC3Meta.abyssIcon(ShipData.api_id) : KC3Meta.shipIcon(ShipData.api_id)
+				);
 				
 				if(ConfigManager.salt_list.indexOf(ShipData.kc3_bship)>=0) {
 					shipBox.addClass('salted');
@@ -173,6 +171,14 @@
 				e.preventDefault();
 				return false;
 			});
+			// On-click seasonal CG links
+			$(".tab_mstship .shipInfo").on("click", ".more .seasonal_cg a", function(e){
+				var sid = $(this).data("sid");
+				//self.scrollShipListTop(sid);
+				KC3StrategyTabs.gotoTab(null, sid);
+				e.preventDefault();
+				return false;
+			});
 			
 			// CG Notice can be dismissed
 			if(!ConfigManager.dismissed_hints.cg_notice){
@@ -188,6 +194,19 @@
 					$(".cg_notes").attr("title", "Dismissed, will not be shown next time. But can always be found at Help Topics.");
 				});
 			}
+			
+			// Fold/unfold sections like a accordion widget
+			$(".tab_mstship .shipInfo .accordion .head").on("click", function(e){
+				$(this).next().slideToggle();
+				return false;
+			}).next().hide();
+			
+			// View big CG mode of our shipgirl
+			$(".tab_mstship .shipInfo .type").addClass("hover").on("click", function(e){
+				if(KC3Master.isRegularShip(self.currentShipId)){
+					self.showShip(self.currentShipId, false, true);
+				}
+			});
 			
 			// Show damaged CG of abyssal boss
 			$(".tab_mstship .shipInfo .boss").on("click", function(e){
@@ -226,6 +245,13 @@
 			// Link to ship specified by URL hash
 			if(!!KC3StrategyTabs.pageParams[1]){
 				this.showShip(KC3StrategyTabs.pageParams[1]);
+				// Also expand unfolded section
+				if(KC3StrategyTabs.pageParams.indexOf("aaci") > 1){
+					$(".tab_mstship .shipInfo .aaci").parent().show();
+				}
+				if(KC3StrategyTabs.pageParams.indexOf("gunfit") > 1){
+					$(".tab_mstship .shipInfo .gunfit").parent().show();
+				}
 			}else{
 				this.showShip();
 			}
@@ -264,7 +290,7 @@
 			shipList.scrollTop(scrollTop);
 		},
 
-		showShip :function(ship_id, tryDamagedGraph = false){
+		showShip :function(ship_id, tryDamagedGraph = false, switchCgView = false){
 			ship_id = Number(ship_id||"405");
 			var
 				self = this,
@@ -282,7 +308,8 @@
 						$(".tab_mstship .shipInfo").addClass('salted');
 					else
 						$(".tab_mstship .shipInfo").removeClass('salted');
-				};
+				},
+				viewCgMode = switchCgView && $(".tab_mstship .shipInfo .intro").is(":visible");
 			this.currentShipId = ship_id;
 			console.debug("shipData", shipData);
 			if(!shipData) { return; }
@@ -291,6 +318,7 @@
 				.format(ship_id, KC3Meta.shipName(shipData.api_name),
 					KC3Meta.shipReadingName(shipData.api_yomi).replace("-", "") ) );
 			$(".tab_mstship .shipInfo .type").text( "{0}".format(KC3Meta.stype(shipData.api_stype)) );
+			$(".tab_mstship .shipInfo .json").text( '"{0}":{1}'.format(ship_id, JSON.stringify(shipData)) );
 			
 			// CG VIEWER
 			var shipFile = KC3Master.graph(ship_id).api_filename;
@@ -302,8 +330,8 @@
 			
 			var shipSrc = "../../../../assets/swf/card.swf?sip=" + this.server_ip
 					+ ("&shipFile=" + shipFile + (tryDamagedGraph ? this.damagedBossFileSuffix : ""))
-					+ ("&abyss=" + (ship_id > 500 && ship_id <= 800 ? 1 : 0))
-					+ (ship_id > 800 ? "&forceFrame=6" : "")
+					+ ("&abyss=" + (KC3Master.isAbyssalShip(ship_id) ? 1 : 0))
+					+ (KC3Master.isSeasonalShip(ship_id) || viewCgMode ? "&forceFrame=6" : "")
 					+ (!this.currentCardVersion ? "" : "&ver=" + this.currentCardVersion);
 			
 			$(".tab_mstship .shipInfo .cgswf embed").remove();
@@ -318,7 +346,7 @@
 			saltClassUpdate();
 			
 			var statBox;
-			if(ship_id<=500){
+			if(KC3Master.isRegularShip(ship_id) && !viewCgMode){
 				// Ship-only, non abyssal
 				$(".tab_mstship .shipInfo .stats").empty();
 				$(".tab_mstship .shipInfo .stats").css("width", "");
@@ -440,18 +468,35 @@
 				
 				if (otherFormIds.length > 0) {
 					$(".tab_mstship .shipInfo .more .other_forms a").remove();
-
 					$.each(otherFormIds, function(i,x) {
 						$("<a/>")
 							.addClass("hover")
-							.text( KC3Meta.shipName(KC3Master.ship(x).api_name) )
+							.text( KC3Meta.shipName(self.mergedMasterShips[x].api_name) )
 							.data("sid",x)
 							.appendTo( ".tab_mstship .shipInfo .more .other_forms .other_forms_list" );
 					});
-					
 					$(".tab_mstship .shipInfo .more .other_forms").show();
 				} else {
 					$(".tab_mstship .shipInfo .more .other_forms").hide();
+				}
+
+				// seasonal CGs
+				var seasonalCgIds = Object.keys(this.mergedMasterShips).filter(
+					id => KC3Master.isSeasonalShip(id)
+						&& this.mergedMasterShips[id].api_yomi === shipData.api_yomi
+				);
+				if (seasonalCgIds.length > 0) {
+					$(".tab_mstship .shipInfo .more .seasonal_cg a").remove();
+					$.each(seasonalCgIds, function(i, x) {
+						$("<a/>")
+							.addClass("hover")
+							.text( KC3Meta.shipName(self.mergedMasterShips[x].api_name) )
+							.data("sid", x)
+							.appendTo( ".tab_mstship .shipInfo .more .seasonal_cg .seasonal_cg_list" );
+					});
+					$(".tab_mstship .shipInfo .more .seasonal_cg").show();
+				} else {
+					$(".tab_mstship .shipInfo .more .seasonal_cg").hide();
 				}
 
 				$(".tab_mstship .scrap .rsc").each(function(index){
@@ -549,8 +594,10 @@
 						aaciBox.appendTo(".aaciList");
 					});
 					$(".aaci").show();
+					$(".aaci").parent().prev().show();
 				} else {
 					$(".aaci").hide();
+					$(".aaci").parent().prev().hide();
 				}
 				
 				// GUN FITS
@@ -582,6 +629,9 @@
 						
 						gunfitBox.appendTo(".gunfitList");
 					});
+					$(".gunfit").parent().prev().show();
+				} else {
+					$(".gunfit").parent().prev().hide();
 				}
 				
 				// BOXES
@@ -592,7 +642,7 @@
 				$(".tab_mstship .shipInfo .json").hide();
 				$(".tab_mstship .shipInfo .boss").hide();
 				$(".tab_mstship .shipInfo .encounter").hide();
-				$(".tab_mstship .shipInfo .gunfit").show();
+				$(".tab_mstship .shipInfo .accordion").show();
 				$(".tab_mstship .shipInfo .tokubest").show();
 				if(ConfigManager.info_salt)
 					$(".tab_mstship .shipInfo .tokubest .salty-zone").show();
@@ -602,12 +652,11 @@
 					$(".tab_mstship .shipInfo .tokubest .to-quotes").show();
 				else
 					$(".tab_mstship .shipInfo .tokubest .to-quotes").hide();
-			} else if (shipData.api_id <= 800) {
+			} else if (KC3Master.isAbyssalShip(ship_id)) {
 				// abyssals, show larger CG viewer
 				$(".tab_mstship .shipInfo .stats").hide();
 				$(".tab_mstship .shipInfo .equipments").hide();
-				$(".tab_mstship .shipInfo .json").hide().css("width", "100%")
-					.text(JSON.stringify(shipData));
+				$(".tab_mstship .shipInfo .json").hide().css("width", "100%");
 				$(".tab_mstship .shipInfo .subtitles").empty().hide();
 				$(".tab_mstship .shipInfo .cgswf")
 					.css("width", "100%")
@@ -718,13 +767,12 @@
 				$(".tab_mstship .shipInfo .hourlies").hide();
 				$(".tab_mstship .shipInfo .intro").hide();
 				$(".tab_mstship .shipInfo .more").hide();
-				$(".tab_mstship .shipInfo .aaci").hide();
-				$(".tab_mstship .shipInfo .gunfit").hide();
+				$(".tab_mstship .shipInfo .accordion").hide();
 				$(".tab_mstship .shipInfo .tokubest").hide();
 			} else {
 				$(".tab_mstship .shipInfo .stats").hide();
 				$(".tab_mstship .shipInfo .equipments").hide();
-				$(".tab_mstship .shipInfo .json").hide();
+				$(".tab_mstship .shipInfo .json").hide().css("width", "100%");
 				$(".tab_mstship .shipInfo .subtitles").hide();
 				$(".tab_mstship .shipInfo .cgswf").css("width", "100%").css("height", "600px");
 				$(".tab_mstship .shipInfo .cgswf embed").css("width", "100%").css("height", "600px");
@@ -735,8 +783,7 @@
 				$(".tab_mstship .shipInfo .boss").hide();
 				$(".tab_mstship .shipInfo .encounter").hide();
 				$(".tab_mstship .shipInfo .more").hide();
-				$(".tab_mstship .shipInfo .aaci").hide();
-				$(".tab_mstship .shipInfo .gunfit").hide();
+				$(".tab_mstship .shipInfo .accordion").hide();
 				$(".tab_mstship .shipInfo .tokubest").hide();
 			}
 		}

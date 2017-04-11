@@ -93,7 +93,7 @@ Xxxxxxx
 		},
 		
 		snapshotFleetState :function(){
-			PlayerManager.hq.lastSortie = PlayerManager.fleets_backup();
+			PlayerManager.hq.lastSortie = PlayerManager.cloneFleets();
 			focusedFleet = (PlayerManager.combinedFleet&&this.fleetSent===1) ? [0,1] : [this.fleetSent-1];
 			PlayerManager.hq.save();
 		},
@@ -525,8 +525,8 @@ Xxxxxxx
 				if(!shipId || shipId < 0){
 					return;
 				}
-				let shipMst = (shipId <= 500) ?
-					KC3Master.ship(shipId) : KC3Master.abyssalShip(shipId, true);
+				let shipMst = KC3Master.isAbyssalShip(shipId) ?
+					KC3Master.abyssalShip(shipId, true) : KC3Master.ship(shipId);
 				// no ship master data
 				if(!shipMst){
 					exceptions[shipId] = null;
